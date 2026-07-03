@@ -192,7 +192,20 @@
             var ctx = liff.getContext();
             var uid = (ctx && ctx.userId) || '';
             if (!uid) {
-              // 外部ブラウザ等: ログイン後のIDトークンから取得
+              // LINEのトーク内ブラウザ(通常リンクとして開いた場合)は
+              // access.line.me へのリダイレクトがブロックされるため、
+              // liff.login() せず開き方の案内を出す
+              var isLineInAppBrowser = /Line\//i.test(navigator.userAgent) && !liff.isInClient();
+              if (isLineInAppBrowser) {
+                fail('このURLからは診察券を開けません。\nリッチメニューの「デジタル診察券」、または\nhttps://liff.line.me/' + LIFF_ID + '\nのリンクから開いてください。');
+                return;
+              }
+              // LIFFブラウザ内でUIDが取れないのは異常(通常は起きない)
+              if (liff.isInClient()) {
+                fail('LINEのユーザー情報を取得できませんでした。一度閉じて、リッチメニューから開き直してください。');
+                return;
+              }
+              // 外部ブラウザ(Safari/Chrome等): ログイン後のIDトークンから取得
               if (!liff.isLoggedIn()) {
                 setStep('LINEログインへ移動');
                 liff.login();
