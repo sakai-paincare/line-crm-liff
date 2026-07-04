@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ご予約</title>
+  <!-- 実際に使うオリジンへの先行接続(track.html と同じ構成):
+       static.line-scdn.net = LIFF SDK / api.line.me = liff.init のAPI
+       script.google.com → script.googleusercontent.com = 計測GET(302で両方通る) -->
+  <link rel="preconnect" href="https://static.line-scdn.net">
+  <link rel="dns-prefetch" href="https://static.line-scdn.net">
+  <link rel="preconnect" href="https://api.line.me">
+  <link rel="dns-prefetch" href="https://api.line.me">
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="dns-prefetch" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com">
+  <link rel="dns-prefetch" href="https://script.googleusercontent.com">
+  <style>
+    /* 外部リソース依存なし(画像・Webフォント不使用)。HTML描画と同時にボタンが押せる */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+      background: #f0f4f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .panel {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+      padding: 28px 20px;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .title { font-size: 20px; font-weight: 700; color: #334; }
+    .lead  { font-size: 15px; color: #667; margin-top: 8px; line-height: 1.7; }
+    /* 高齢の患者さん向け: ボタンは大きく・文字は太く・タップ領域は全幅 */
+    .btn {
+      display: block;
+      width: 100%;
+      margin-top: 20px;
+      padding: 20px 16px;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      text-align: center;
+      font-family: inherit;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { opacity: 0.85; }
+    .btn:disabled { opacity: 0.6; }
+    .btn-web  { background: #2a7d8c; }
+    .btn-line { background: #06c755; }
+    .btn .main { display: block; font-size: 19px; font-weight: 700; color: #fff; line-height: 1.5; }
+    .btn .sub  { display: block; font-size: 13px; color: rgba(255, 255, 255, 0.9); margin-top: 6px; line-height: 1.6; }
+    .status { font-size: 14px; color: #667; margin-top: 16px; min-height: 1.5em; }
+    .fallback {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 10px;
+      background: #fdf3f3;
+      color: #a33;
+      font-size: 15px;
+      line-height: 1.8;
+      text-align: left;
+    }
+    .debug {
+      font-size: 11px;
+      color: #778899;
+      margin-top: 16px;
+      word-break: break-all;
+      line-height: 1.8;
+      text-align: left;
+    }
+  </style>
+  <script>
+    // ============================================================
+    // コア処理(SDK非依存・<head>で即実行)
+    // - ボタン描画・タップをSDK読込でブロックしない(SDKはbody末尾でasync読込)
+    // - WEB予約はSDKなしでも遷移できる。LINE予約希望はSDK必須のため、
+    //   init前のタップは保留し、完了後に自動送信(6秒で諦めてフォールバック)
+    // ============================================================
+    var LIFF_ID = ''; // TODO: reserve.html用LIFFアプリのID(チャネル「会員証」2010587487 に追加後、記入)
+    var API_URL = 'https://script.google.com/macros/s/AKfycbzh0p2mD8wEo9nGOJpn4bqhZ_7z-JMDU0vspq7iHFfIvEy8PTEniljgL7Vjb9qOxgzm4Q/exec';
+
+    // WEB予約ページ(現行: セレクトタイプ。richmenu.gs の「予約する」枠と同じURI)
+    // TODO: CLIUS移行時はこのURLをCLIUSのWEB予約URLに差し替える(ここ1行のみ)
+    var WEB_RESERVE_URL = 'https://select-type.com/rsv/?id=j-wgTEZz0T4&openExternalBrowser=1';
+
+    // トークに自動送信するメッセージ(GAS reserve.gs の RESERVE_TRIGGER_TEXT と一致させること)
+    var RESERVE_MESSAGE = '予約希望';
+
+    var LINE_PENDING_TIMEOUT_MS = 6000; // init待ちのLINE予約タップを諦めるまでの時間
+
+    // ---- 計測マーク(performance.now ベース。収集は常時、出力はdebug=1のみ) ----
+    var T0 = performance.now();
+    var marks = [];
+    function mark(label) { marks.push(label + ': ' + Math.round(performance.now() - T0) + 'ms'); }
+    mark('スクリプト評価開始');
+    document.addEventListener('DOMContentLoaded', function () { mark('DOM描画(DOMContentLoaded)'); });
+
+    // ---- パラメータ解決(liff.state 包み対応。track.html と同じ) ----
+    function getParam(name) {
+      try {
+        var q = new URLSearchParams(location.search);
+        var v = q.get(name);
+        if (v !== null) return v;
+        var state = q.get('liff.state');
+        if (state) {
+          var inner = new URLSearchParams(String(state).replace(/^[?\/]+/, ''));
+          return inner.get(name);
+        }
+      } catch (e) { /* 解析失敗はデフォルト扱い */ }
+      return null;
+    }
+    var DEBUG = getParam('debug') === '1';
+
+    // ---- LIFFの状態 ----
+    var sdkDone = false;    // liff.init が完了した(成功・失敗問わず)
+    var liffReady = false;  // liff.init 成功
+    var UID = '';
+    var pendingLineReserve = false; // init完了前にLINE予約がタップされた
+
+    // ---- 計測送信(完全fire-and-forget。track.html と同じ) ----
+    // sendBeaconはPOSTのため使わない(GASのdoPost=LINE Webhookと衝突)。
+    // fetch GET + keepalive はページ遷移後も送信が継続される。応答もPromiseも待たない。
+    function sendTap(target) {
+      mark('計測送信(' + target + ')');
+      if (DEBUG) dumpDebug();
+      var url = API_URL +
+        '?t=tap&d=' + encodeURIComponent(target) +
+        '&u=' + encodeURIComponent(UID) +
+        '&_=' + Date.now(); // キャッシュ回避
+      try {
+        if (window.fetch) {
+          fetch(url, { method: 'GET', mode: 'no-cors', keepalive: true });
+          return;
+        }
+      } catch (e) { /* fallthrough */ }
+      try { new Image().src = url; } catch (e) { /* 計測は諦めて続行 */ }
+    }
+
+    // ページ表示の計測(d=reserve_menu)。UID確定後に1回だけ送る
+    var menuViewSent = false;
+    function sendMenuView() {
+      if (menuViewSent) return;
+      menuViewSent = true;
+      sendTap('reserve_menu');
+    }
+
+    // ---- デバッグ出力(?debug=1 のときのみ。本番では何も出ない) ----
+    function dumpDebug() {
+      try { console.log('[reserve debug]\n' + marks.join('\n')); } catch (e) {}
+      var el = document.getElementById('debug');
+      if (el) { el.hidden = false; el.innerHTML = marks.join('<br>'); }
+    }
+
+    function setStatus(text) {
+      var el = document.getElementById('status');
+      if (el) el.textContent = text;
+    }
+
+    // ---- ① WEB予約 ----
+    // 計測を投げてから予約ページへ。LIFF内なら外部ブラウザで開く(リッチメニュー
+    // 直リンク時代の openExternalBrowser=1 と同じ挙動)。init前・init失敗時は
+    // そのまま遷移(LIFF内ブラウザで開くが予約は可能)
+    function onWebReserve() {
+      sendTap('web_reserve');
+      if (liffReady && liff.isInClient()) {
+        try {
+          liff.openWindow({ url: WEB_RESERVE_URL, external: true });
+          setStatus('ブラウザで予約ページを開きました');
+          return;
+        } catch (e) { /* fallthrough */ }
+      }
+      location.href = WEB_RESERVE_URL;
+    }
+
+    // ---- ② LINEで予約希望 ----
+    // 計測 → トークに「予約希望」を自動送信 → LIFFを閉じる(GAS側でステップフロー開始)。
+    // 送信できない環境(外部ブラウザ・init失敗・スコープ不足)は手入力を案内
+    function onLineReserve() {
+      var btn = document.getElementById('btn-line');
+      if (btn) btn.disabled = true; // 二重送信防止
+      sendTap('line_reserve');
+      if (!sdkDone) {
+        // init待ち: 完了したら自動で送信する(長引いたら諦めて案内)
+        pendingLineReserve = true;
+        setStatus('準備しています…');
+        setTimeout(function () {
+          if (pendingLineReserve) { pendingLineReserve = false; showLineFallback(); }
+        }, LINE_PENDING_TIMEOUT_MS);
+        return;
+      }
+      doSendReserveMessage();
+    }
+
+    function doSendReserveMessage() {
+      if (!liffReady || !liff.isInClient() || typeof liff.sendMessages !== 'function') {
+        showLineFallback();
+        return;
+      }
+      setStatus('送信しています…');
+      liff.sendMessages([{ type: 'text', text: RESERVE_MESSAGE }])
+        .then(function () {
+          mark('sendMessages成功');
+          if (DEBUG) { dumpDebug(); return; } // デバッグ時は閉じずに計測値を確認
+          liff.closeWindow();
+        })
+        .catch(function (e) {
+          mark('sendMessages失敗: ' + ((e && e.message) || e));
+          showLineFallback();
+        });
+    }
+
+    // sendMessages が使えないときのフォールバック案内
+    function showLineFallback() {
+      setStatus('');
+      var el = document.getElementById('fallback');
+      if (el) el.hidden = false;
+      if (DEBUG) dumpDebug();
+    }
+
+    // ---- メイン(body末尾の <script async onload> から呼ばれる) ----
+    // liff.init 完了後にUIDを取得し、ページ表示の計測(d=reserve_menu)を送る
+    function main() {
+      mark('SDK読込完了');
+      if (typeof liff === 'undefined' || !LIFF_ID) { initSettled(); return; }
+      liff.init({ liffId: LIFF_ID })
+        .then(function () {
+          mark('liff.init完了');
+          liffReady = true;
+          var ctx = liff.getContext();
+          UID = (ctx && ctx.userId) || '';
+          mark('UID取得' + (UID ? '' : '(空)'));
+          initSettled();
+        })
+        .catch(function (e) {
+          mark('liff.init失敗: ' + ((e && e.message) || e));
+          initSettled();
+        });
+    }
+    function sdkFailed() { mark('SDK読込失敗'); initSettled(); }
+
+    // init決着(成功・失敗問わず): 表示計測を送り、保留中のLINE予約タップを処理
+    function initSettled() {
+      sdkDone = true;
+      sendMenuView();
+      if (DEBUG) dumpDebug();
+      if (pendingLineReserve) {
+        pendingLineReserve = false;
+        doSendReserveMessage();
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="panel">
+    <p class="title">ご予約</p>
+    <p class="lead">ご希望の方法をお選びください</p>
+
+    <button type="button" id="btn-web" class="btn btn-web" onclick="onWebReserve()">
+      <span class="main">🌐 WEB予約はこちら</span>
+      <span class="sub">※メールアドレスの入力が必要です</span>
+    </button>
+
+    <button type="button" id="btn-line" class="btn btn-line" onclick="onLineReserve()">
+      <span class="main">💬 LINEで予約希望を送る</span>
+      <span class="sub">トークに戻って選ぶだけで送れます</span>
+    </button>
+
+    <p id="status" class="status"></p>
+
+    <div id="fallback" class="fallback" hidden>
+      自動送信できませんでした。<br>
+      お手数ですが、トークに戻り「予約希望」と入力して送信してください。
+    </div>
+
+    <p id="debug" class="debug" hidden></p>
+  </div>
+
+  <!-- async: ボタン描画・タップをブロックしない。
+       読込完了で main()、失敗時は sdkFailed() → 計測のみ送って続行 -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" async onload="main()" onerror="sdkFailed()"></script>
+</body>
+</html>
