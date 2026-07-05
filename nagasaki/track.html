@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ページを開いています</title>
+  <!-- 実際に使うオリジンへの先行接続:
+       static.line-scdn.net = LIFF SDK / api.line.me = liff.init のAPI
+       script.google.com → script.googleusercontent.com = 計測GET(302で両方通る) -->
+  <link rel="preconnect" href="https://static.line-scdn.net">
+  <link rel="dns-prefetch" href="https://static.line-scdn.net">
+  <link rel="preconnect" href="https://api.line.me">
+  <link rel="dns-prefetch" href="https://api.line.me">
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="dns-prefetch" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com">
+  <link rel="dns-prefetch" href="https://script.googleusercontent.com">
+  <style>
+    /* 外部リソース依存なし(画像・Webフォント不使用)。HTML描画と同時に表示される */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+      background: #f0f4f5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      color: #445566;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 4px solid #d5e2e6;
+      border-top-color: #2a7d8c;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .message { font-size: 15px; letter-spacing: 0.05em; }
+    .debug {
+      font-size: 11px;
+      color: #778899;
+      max-width: 320px;
+      word-break: break-all;
+      line-height: 1.8;
+      text-align: left;
+    }
+  </style>
+  <script>
+    // ============================================================
+    // コア処理(SDK非依存・<head>で即実行)— ながさきハートクリニック版
+    // - スピナー描画をブロックしない(SDKはbody末尾でasync読込)
+    // - SDKのダウンロードが遅い/失敗でも、ここのウォッチドッグが必ず遷移させる
+    // ============================================================
+    // TODO: 長崎Loginチャネル作成後、track用LIFFのIDを記入
+    var LIFF_ID = '';
+    // TODO: 長崎GASウェブアプリの /exec URLを記入(デプロイ後)
+    var API_URL = '';
+
+    // 遷移先マップ: ?d=<キー> で選択。不正なキーはデフォルトへ。
+    // リッチメニュー(transport / access)と診療案内カルーセル(それ以外)の両方から使う。
+    // キーはGAS tracking.gs の TRACK_INTEREST_TAGS と対応(cardio等はタグ付与、transport/accessはTaps記録のみ)
+    var DESTINATIONS = {
+      cardio:       'https://nagasaki-hc.com/info/clinic_info', // 循環器内科
+      pain_ivr:     'https://paincare.clinic/',                 // 痛みの血管内治療外来
+      beauty:       'https://nagasaki-hc.com/placenta',         // 美容アンチエイジング点滴
+      cardiac_reha: 'https://nagasaki-hc.com/cardiac_reha',     // 心臓リハビリ
+      transport:    'https://nagasaki-hc.com/feature#wvh4',     // 送迎サービス
+      access:       'https://nagasaki-hc.com/access',           // アクセス・駐車場
+    };
+    var DEFAULT_DESTINATION = 'https://nagasaki-hc.com/';
+    var REDIRECT_TIMEOUT_MS = 3000; // 保険: 何があってもこの時間で必ず遷移
+
+    // ---- 計測マーク(performance.now ベース。収集は常時、出力はdebug=1のみ) ----
+    var T0 = performance.now();
+    var marks = [];
+    function mark(label) { marks.push(label + ': ' + Math.round(performance.now() - T0) + 'ms'); }
+    mark('スクリプト評価開始');
+    document.addEventListener('DOMContentLoaded', function () { mark('DOM描画(DOMContentLoaded)'); });
+
+    // ---- パラメータ解決 ----
+    // liff.line.me/{ID}?d=cardio で開いた直後は ?liff.state=%3Fd%3Dcardio の形で
+    // 包まれているため両対応する(liff.init完了前でも遷移先を解決できる)
+    function getParam(name) {
+      try {
+        var q = new URLSearchParams(location.search);
+        var v = q.get(name);
+        if (v !== null) return v;
+        var state = q.get('liff.state');
+        if (state) {
+          var inner = new URLSearchParams(String(state).replace(/^[?\/]+/, ''));
+          return inner.get(name);
+        }
+      } catch (e) { /* 解析失敗はデフォルト扱い */ }
+      return null;
+    }
+    function getTargetKey() { return getParam('d') || ''; }
+    var DEBUG = getParam('debug') === '1';
+
+    // ---- リダイレクト(必ず1回だけ。計測より遷移を優先) ----
+    var redirected = false;
+    function go() {
+      if (redirected) return;
+      redirected = true;
+      mark('リダイレクト発火');
+      if (DEBUG) dumpDebug();
+      location.replace(DESTINATIONS[getTargetKey()] || DEFAULT_DESTINATION);
+    }
+
+    // 保険: SDK読込・initがどれだけ遅くても必ず遷移する(SDK読込前から作動)
+    // デバッグ時のみ計測値を読めるよう8秒に延長
+    setTimeout(go, DEBUG ? 8000 : REDIRECT_TIMEOUT_MS);
+
+    // ---- 計測送信(完全fire-and-forget) ----
+    // sendBeaconはPOSTのため使わない(GASのdoPost=LINE Webhookと衝突)。
+    // fetch GET + keepalive はページ遷移後も送信が継続される。応答もPromiseも待たない。
+    function sendTap(uid) {
+      if (!API_URL) { mark('計測スキップ(API_URL未設定)'); return; }
+      mark('計測送信開始');
+      var url = API_URL +
+        '?t=tap&d=' + encodeURIComponent(getTargetKey()) +
+        '&u=' + encodeURIComponent(uid) +
+        '&_=' + Date.now(); // キャッシュ回避
+      try {
+        if (window.fetch) {
+          fetch(url, { method: 'GET', mode: 'no-cors', keepalive: true });
+          return;
+        }
+      } catch (e) { /* fallthrough */ }
+      try { new Image().src = url; } catch (e) { /* 計測は諦めて遷移 */ }
+    }
+
+    // ---- デバッグ出力(?debug=1 のときのみ。本番タップでは何も出ない) ----
+    function dumpDebug() {
+      try { console.log('[track debug]\n' + marks.join('\n')); } catch (e) {}
+      var el = document.getElementById('debug');
+      if (el) { el.hidden = false; el.innerHTML = marks.join('<br>'); }
+    }
+
+    // ---- メイン(body末尾の <script async onload> から呼ばれる) ----
+    // liff.init は省略せず完全に待つ。UID取得後、送信開始を待たずに即遷移。
+    function main() {
+      mark('SDK読込完了');
+      if (typeof liff === 'undefined' || !LIFF_ID) { go(); return; }
+      liff.init({ liffId: LIFF_ID })
+        .then(function () {
+          mark('liff.init完了');
+          var ctx = liff.getContext();
+          var uid = (ctx && ctx.userId) || '';
+          mark('UID取得');
+          if (uid) sendTap(uid); // 送信は投げ捨て。この行はブロックしない
+          if (DEBUG) {
+            dumpDebug();
+            setTimeout(go, 5000); // デバッグ時のみ5秒表示してから遷移
+            return;
+          }
+          go();
+        })
+        .catch(go); // init失敗でも必ず遷移
+    }
+    function sdkFailed() { mark('SDK読込失敗'); go(); }
+  </script>
+</head>
+<body>
+  <div class="spinner"></div>
+  <p class="message">ページを開いています…</p>
+  <p id="debug" class="debug" hidden></p>
+
+  <!-- async: スピナー描画・DOMContentLoadedをブロックしない。
+       読込完了で main()、失敗時は sdkFailed() → 即遷移 -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" async onload="main()" onerror="sdkFailed()"></script>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>デジタル診察券</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+      background: #f0f4f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .panel {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+      padding: 32px 24px;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .label { font-size: 13px; color: #667; letter-spacing: 0.1em; }
+    .number {
+      font-size: 40px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin: 8px 0 16px;
+      font-variant-numeric: tabular-nums;
+    }
+    #barcode { width: 100%; max-width: 320px; }
+    .hint { font-size: 12px; color: #889; margin-top: 16px; }
+    .message { font-size: 15px; line-height: 1.8; color: #334; }
+    .error { color: #b00020; font-size: 14px; line-height: 1.7; white-space: pre-line; }
+    .debug { font-size: 10px; color: #aab; margin-top: 12px; word-break: break-all; text-align: left; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div id="loading" class="message">読み込み中…</div>
+
+    <div id="card" hidden>
+      <p class="label">診察券番号</p>
+      <p id="pid" class="number"></p>
+      <svg id="barcode"></svg>
+      <p class="hint">受付でこのバーコードをご提示ください</p>
+    </div>
+
+    <div id="notlinked" class="message" hidden>
+      会員登録がまだお済みでないようです。<br>
+      トーク画面で診察券番号を送信してください。
+    </div>
+
+    <div id="error" class="error" hidden></div>
+
+    <!-- デバッグ表示(正常表示できたら消える) -->
+    <div id="debug" class="debug">
+      <div id="dbg-liffid"></div>
+      <div id="dbg-sdk"></div>
+      <div id="dbg-step"></div>
+      <div id="dbg-err"></div>
+    </div>
+  </div>
+
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script>
+    // ============================================================
+    // 設定 — ながさきハートクリニック版
+    // (GitHub Pages配信のためHTMLに直接記載。LIFF IDは秘密情報ではない)
+    // ============================================================
+    // TODO: 長崎Loginチャネル作成後、card用LIFFのIDを記入
+    var LIFF_ID = '';
+    // TODO: 長崎GASウェブアプリの /exec URLを記入(デプロイ後)
+    var API_URL = '';
+
+    // ---- デバッグ表示 ----
+    function dbg(id, text) { document.getElementById(id).textContent = text; }
+
+    var currentStep = '起動';
+    function setStep(s) {
+      currentStep = s;
+      dbg('dbg-step', 'step: ' + s);
+    }
+
+    function describeError(err) {
+      if (err === null || err === undefined) return 'unknown';
+      var parts = [];
+      if (err.code) parts.push('code=' + err.code);
+      parts.push('message=' + (err.message !== undefined ? err.message : String(err)));
+      return parts.join(' / ');
+    }
+
+    function show(id) {
+      ['loading', 'card', 'notlinked', 'error'].forEach(function (x) {
+        document.getElementById(x).hidden = (x !== id);
+      });
+      if (id !== 'loading') clearTimeout(watchdog);
+      if (id === 'card' || id === 'notlinked') {
+        document.getElementById('debug').hidden = true; // 正常時はデバッグ表示を消す
+      }
+    }
+
+    function fail(message, err) {
+      document.getElementById('error').textContent =
+        message + '\n改善しない場合は受付にお声かけください。';
+      if (err !== undefined) dbg('dbg-err', 'error: ' + describeError(err));
+      show('error');
+    }
+
+    window.onerror = function (msg) {
+      fail('予期しないエラー: ' + msg + '(step: ' + currentStep + ')');
+      return false;
+    };
+
+    // どこかでハングした場合の保険(15秒)
+    var watchdog = setTimeout(function () {
+      if (!document.getElementById('loading').hidden) {
+        fail('読み込みがタイムアウトしました(step: ' + currentStep + ')');
+      }
+    }, 15000);
+
+    // ---- API呼び出し ----
+    // GASのdoGetは302リダイレクトを返すため redirect:'follow' で追従し、
+    // text()で受けてからJSON.parseする(Content-Typeに依存しない)
+    function callApi(uid) {
+      setStep('API呼び出し(fetch)');
+      return fetch(API_URL + '?action=card&uid=' + encodeURIComponent(uid), {
+        method: 'GET',
+        redirect: 'follow',
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.text();
+        })
+        .then(function (text) {
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            throw new Error('JSON解析失敗: ' + text.substring(0, 80));
+          }
+        });
+    }
+
+    function render(json) {
+      setStep('結果表示');
+      if (!json || !json.ok) {
+        throw new Error((json && json.error) || 'サーバーエラー');
+      }
+      if (json.data.status === 'linked') {
+        var pid = String(json.data.patient_id);
+        document.getElementById('pid').textContent = pid;
+        JsBarcode('#barcode', pid, {
+          format: 'CODE128',
+          displayValue: false,
+          height: 90,
+          margin: 8,
+        });
+        show('card');
+      } else {
+        show('notlinked');
+      }
+    }
+
+    function main() {
+      try {
+        dbg('dbg-liffid', 'liff_id: ' + JSON.stringify(LIFF_ID));
+
+        setStep('SDK読み込み確認');
+        var sdkLoaded = (typeof liff !== 'undefined' && typeof window.liff !== 'undefined');
+        dbg('dbg-sdk', 'sdk: ' + (sdkLoaded ? 'window.liff あり' : 'window.liff なし(読み込み失敗)'));
+        if (!sdkLoaded) {
+          fail('LIFF SDKを読み込めませんでした。通信環境をご確認のうえ開き直してください。');
+          return;
+        }
+        if (!LIFF_ID) {
+          fail('LIFF_ID が未設定です(nagasaki/card.html の LIFF_ID を記入してください)。');
+          return;
+        }
+        if (!API_URL) {
+          fail('API_URL が未設定です(nagasaki/card.html の API_URL を記入してください)。');
+          return;
+        }
+
+        setStep('liff.init');
+        liff.init({ liffId: LIFF_ID })
+          .catch(function (err) {
+            throw { code: (err && err.code) || 'INIT_ERROR',
+                    message: 'liff.init失敗: ' + (err && err.message !== undefined ? err.message : String(err)) };
+          })
+          .then(function () {
+            setStep('UID取得(getContext)');
+            var ctx = liff.getContext();
+            var uid = (ctx && ctx.userId) || '';
+            if (!uid) {
+              // LINEのトーク内ブラウザ(通常リンクとして開いた場合)は
+              // access.line.me へのリダイレクトがブロックされるため、
+              // liff.login() せず開き方の案内を出す
+              var isLineInAppBrowser = /Line\//i.test(navigator.userAgent) && !liff.isInClient();
+              if (isLineInAppBrowser) {
+                fail('このURLからは診察券を開けません。\nリッチメニューの「デジタル診察券」、または\nhttps://liff.line.me/' + LIFF_ID + '\nのリンクから開いてください。');
+                return;
+              }
+              // LIFFブラウザ内でUIDが取れないのは異常(通常は起きない)
+              if (liff.isInClient()) {
+                fail('LINEのユーザー情報を取得できませんでした。一度閉じて、リッチメニューから開き直してください。');
+                return;
+              }
+              // 外部ブラウザ(Safari/Chrome等): ログイン後のIDトークンから取得
+              if (!liff.isLoggedIn()) {
+                setStep('LINEログインへ移動');
+                liff.login();
+                return;
+              }
+              setStep('UID取得(IDトークン)');
+              var idToken = liff.getDecodedIDToken();
+              uid = (idToken && idToken.sub) || '';
+            }
+            if (!uid) {
+              fail('LINEのユーザー情報を取得できませんでした。LINEアプリのメニューから開き直してください。');
+              return;
+            }
+            return callApi(uid).then(render);
+          })
+          .catch(function (err) {
+            fail('エラーが発生しました(step: ' + currentStep + ')', err);
+          });
+      } catch (err) {
+        fail('エラーが発生しました(step: ' + currentStep + ')', err);
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
