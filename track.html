@@ -111,8 +111,10 @@
       mark('計測送信開始');
       var url = API_URL +
         '?t=tap&d=' + encodeURIComponent(getTargetKey()) +
-        '&u=' + encodeURIComponent(uid) +
-        '&_=' + Date.now(); // キャッシュ回避
+        '&u=' + encodeURIComponent(uid);
+      var b = getParam('b'); // 配信経由のタップ(&b=broadcast_id)。クリック集計用
+      if (b) url += '&b=' + encodeURIComponent(b);
+      url += '&_=' + Date.now(); // キャッシュ回避
       try {
         if (window.fetch) {
           fetch(url, { method: 'GET', mode: 'no-cors', keepalive: true });
