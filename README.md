@@ -13,8 +13,8 @@ LINE公式アカウント「デジタル診察券」LIFFページ(GitHub Pages�
 - `nagasaki/` … ながさきハートクリニック本番向け(card / track / reserve の3ページ。
   冒頭の `LIFF_ID` / `API_URL` は長崎のLoginチャネル・GAS作成後に記入)
 - `fukuoka/` … 福岡ペインケアクリニック本番向け(card / track / reserve の3ページ。
-  冒頭の `LIFF_ID` / `API_URL` は本番LIFF作成・GASデプロイ後に記入。
-  手順は line-crm の docs/production-migration.md §4)
+  `LIFF_ID` / `API_URL` 記入済み。reserve の `WEB_RESERVE_URL` のみ
+  メディカル革命byGMOのURL確定待ち。手順は line-crm の docs/production-migration.md §4)
 - 公開URL: https://sakai-paincare.github.io/line-crm-liff/ (各ページは `/<ディレクトリ>/<ファイル名>` )
 - LIFFエンドポイントURLに上記を設定する
 
