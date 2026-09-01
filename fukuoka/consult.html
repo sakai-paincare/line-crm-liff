@@ -37,14 +37,16 @@
     <div id="loading" class="message">読み込み中…</div>
 
     <div id="form" hidden>
-      <h1>無料相談フォーム</h1>
+      <h1 id="form-title">無料相談フォーム</h1>
       <p class="lead">ご相談内容をご記入ください。スタッフが確認し、このLINEに診療時間内に順にお返事いたします。</p>
-      <label>痛みの部位</label>
+      <label id="l-part">痛みの部位</label>
       <input type="text" id="f-part" placeholder="例: 右ひざ">
-      <label>これまでの経過・症状</label>
+      <label id="l-course">これまでの経過・症状</label>
       <textarea id="f-course" placeholder="例: 3ヶ月前から階段の上り下りで痛む"></textarea>
-      <label>気になること</label>
-      <textarea id="f-concern" placeholder="例: 手術せずに治す方法はありますか"></textarea>
+      <div id="g-concern">
+        <label id="l-concern">気になること</label>
+        <textarea id="f-concern" placeholder="例: 手術せずに治す方法はありますか"></textarea>
+      </div>
       <button id="submit">送信する</button>
       <p class="hint">送信後、このLINEに受付メッセージが届きます。</p>
     </div>
@@ -74,6 +76,46 @@
     var API_URL = 'https://script.google.com/macros/s/AKfycbx56mHvPH4TgoasxPWLFqHAbhcOsSAJIj29cb2_o0cRqndksCuRifXX2KbYSGPhSwVt/exec';
 
     var userId = '';
+
+    // タブ別のフォーム定義(?tab=pain/naika/beauty。GAS側テンプレと対応)
+    var TAB_FORMS = {
+      pain: { title: '無料相談フォーム',
+        part: ['痛みの部位', '例: 右ひざ'],
+        course: ['これまでの経過・症状', '例: 3ヶ月前から階段の上り下りで痛む'],
+        concern: ['気になること', '例: 手術せずに治す方法はありますか'] },
+      naika: { title: '内科のご相談',
+        part: ['症状・気になること', '例: 血圧が高めと言われた'],
+        course: ['いつ頃から', '例: 半年ほど前から'],
+        concern: ['健診結果などがあれば', '例: 健診でLDLが高いと指摘'] },
+      beauty: { title: '美容・点滴のご相談',
+        part: ['ご希望・気になること', '例: 疲れが取れにくい'],
+        course: ['ご興味のあるメニュー', '例: にんにく注射・美白点滴'],
+        concern: null }, // 美容は2項目
+    };
+    function getTab() {
+      var q = new URLSearchParams(location.search);
+      var t = q.get('tab');
+      if (!t && q.get('liff.state')) {
+        // LIFFのリダイレクトで元クエリが liff.state に入るケース
+        t = new URLSearchParams(decodeURIComponent(q.get('liff.state')).replace(/^\?/, '')).get('tab');
+      }
+      return TAB_FORMS[t] ? t : 'pain';
+    }
+    var tab = getTab();
+    (function applyTabForm() {
+      var f = TAB_FORMS[tab];
+      document.getElementById('form-title').textContent = f.title;
+      document.getElementById('l-part').textContent = f.part[0];
+      document.getElementById('f-part').placeholder = f.part[1];
+      document.getElementById('l-course').textContent = f.course[0];
+      document.getElementById('f-course').placeholder = f.course[1];
+      if (f.concern) {
+        document.getElementById('l-concern').textContent = f.concern[0];
+        document.getElementById('f-concern').placeholder = f.concern[1];
+      } else {
+        document.getElementById('g-concern').hidden = true;
+      }
+    })();
 
     function show(id) {
       ['loading', 'form', 'done', 'error'].forEach(function (x) {
@@ -117,6 +159,7 @@
         body: JSON.stringify({
           action: 'consult_submit',
           uid: userId,
+          tab: tab,
           part: part, course: course, concern: concern,
         }),
       }).then(function (res) { return res.json(); }).then(function (data) {
