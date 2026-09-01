@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>無料相談フォーム</title>
+  <title>かんたん相談</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -30,6 +30,11 @@
     .message { font-size: 15px; line-height: 1.8; color: #334; text-align: center; padding: 24px 0; }
     .error { color: #b00020; font-size: 14px; line-height: 1.7; white-space: pre-line; }
     .hint { font-size: 11px; color: #889; margin-top: 12px; line-height: 1.6; }
+    .meta {
+      display: inline-block; background: #FCE8F1; color: #E44888;
+      font-size: 12px; font-weight: 700; border-radius: 999px;
+      padding: 4px 12px; margin-bottom: 8px;
+    }
   </style>
 </head>
 <body>
@@ -37,7 +42,8 @@
     <div id="loading" class="message">読み込み中…</div>
 
     <div id="form" hidden>
-      <h1 id="form-title">無料相談フォーム</h1>
+      <div class="meta" id="form-meta">3つの項目・約1分</div>
+      <h1 id="form-title">かんたん相談</h1>
       <p class="lead">ご相談内容をご記入ください。スタッフが確認し、このLINEに診療時間内に順にお返事いたします。</p>
       <label id="l-part">痛みの部位</label>
       <input type="text" id="f-part" placeholder="例: 右ひざ">
@@ -79,15 +85,15 @@
 
     // タブ別のフォーム定義(?tab=pain/naika/beauty。GAS側テンプレと対応)
     var TAB_FORMS = {
-      pain: { title: '無料相談フォーム',
+      pain: { title: 'かんたん相談',
         part: ['痛みの部位', '例: 右ひざ'],
         course: ['これまでの経過・症状', '例: 3ヶ月前から階段の上り下りで痛む'],
         concern: ['気になること', '例: 手術せずに治す方法はありますか'] },
-      naika: { title: '内科のご相談',
+      naika: { title: 'かんたん相談（内科）',
         part: ['症状・気になること', '例: 血圧が高めと言われた'],
         course: ['いつ頃から', '例: 半年ほど前から'],
         concern: ['健診結果などがあれば', '例: 健診でLDLが高いと指摘'] },
-      beauty: { title: '美容・点滴のご相談',
+      beauty: { title: 'かんたん相談（美容・点滴）',
         part: ['ご希望・気になること', '例: 疲れが取れにくい'],
         course: ['ご興味のあるメニュー', '例: にんにく注射・美白点滴'],
         concern: null }, // 美容は2項目
@@ -104,6 +110,8 @@
     var tab = getTab();
     (function applyTabForm() {
       var f = TAB_FORMS[tab];
+      var itemCount = f.concern ? 3 : 2;
+      document.getElementById('form-meta').textContent = itemCount + 'つの項目・約1分';
       document.getElementById('form-title').textContent = f.title;
       document.getElementById('l-part').textContent = f.part[0];
       document.getElementById('f-part').placeholder = f.part[1];
