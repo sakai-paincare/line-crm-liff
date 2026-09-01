@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>無料相談フォーム</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+      background: #f0f4f5; min-height: 100vh; padding: 16px;
+    }
+    .panel {
+      background: #fff; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08);
+      padding: 24px 20px; width: 100%; max-width: 440px; margin: 0 auto;
+    }
+    h1 { font-size: 18px; color: #E44888; margin-bottom: 6px; }
+    .lead { font-size: 13px; color: #667; line-height: 1.7; margin-bottom: 16px; }
+    label { display: block; font-size: 13px; color: #445; margin: 14px 0 4px; font-weight: 600; }
+    input, textarea {
+      width: 100%; padding: 10px; border: 1px solid #ccd; border-radius: 10px;
+      font-size: 16px; font-family: inherit;
+    }
+    textarea { min-height: 88px; }
+    button {
+      width: 100%; margin-top: 20px; padding: 14px; border: none; border-radius: 12px;
+      background: #E44888; color: #fff; font-size: 16px; font-weight: 700; cursor: pointer;
+    }
+    button:disabled { opacity: .5; }
+    .message { font-size: 15px; line-height: 1.8; color: #334; text-align: center; padding: 24px 0; }
+    .error { color: #b00020; font-size: 14px; line-height: 1.7; white-space: pre-line; }
+    .hint { font-size: 11px; color: #889; margin-top: 12px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div id="loading" class="message">読み込み中…</div>
+
+    <div id="form" hidden>
+      <h1>無料相談フォーム</h1>
+      <p class="lead">ご相談内容をご記入ください。スタッフが確認し、このLINEに診療時間内に順にお返事いたします。</p>
+      <label>痛みの部位</label>
+      <input type="text" id="f-part" placeholder="例: 右ひざ">
+      <label>これまでの経過・症状</label>
+      <textarea id="f-course" placeholder="例: 3ヶ月前から階段の上り下りで痛む"></textarea>
+      <label>気になること</label>
+      <textarea id="f-concern" placeholder="例: 手術せずに治す方法はありますか"></textarea>
+      <button id="submit">送信する</button>
+      <p class="hint">送信後、このLINEに受付メッセージが届きます。</p>
+    </div>
+
+    <div id="done" class="message" hidden>
+      ✅ ご相談を受け付けました。<br>
+      LINEに受付メッセージが届きます。<br>
+      診療時間内に順にお返事いたします。
+    </div>
+
+    <div id="error" class="error" hidden></div>
+  </div>
+
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script>
+    // ============================================================
+    // 設定 — 福岡ペインケアクリニック本番版
+    // (GitHub Pages配信のためHTMLに直接記載。LIFF IDは秘密情報ではない)
+    // ============================================================
+    // ⚠ Loginチャネル「会員証」(2010587487)に consult 用LIFFを新規作成し、
+    //   エンドポイントURLをこのページにしてから LIFF_ID を記入すること。
+    //   あわせてGAS側 Script Property CONSULT_LIFF_URL に
+    //   https://liff.line.me/<LIFF_ID> を設定する。
+    var LIFF_ID = 'SET_ME';
+    // 福岡本番GASウェブアプリの /exec URL(card.htmlと同じ)
+    var API_URL = 'https://script.google.com/macros/s/AKfycbx56mHvPH4TgoasxPWLFqHAbhcOsSAJIj29cb2_o0cRqndksCuRifXX2KbYSGPhSwVt/exec';
+
+    var userId = '';
+
+    function show(id) {
+      ['loading', 'form', 'done', 'error'].forEach(function (x) {
+        document.getElementById(x).hidden = (x !== id);
+      });
+    }
+    function fail(message) {
+      document.getElementById('error').textContent =
+        message + '\nお手数ですがトーク画面に直接ご相談内容をお送りください。';
+      show('error');
+    }
+
+    if (LIFF_ID === 'SET_ME') {
+      fail('フォームの準備中です(LIFF未設定)。');
+    } else {
+      liff.init({ liffId: LIFF_ID }).then(function () {
+        if (!liff.isLoggedIn()) { liff.login(); return; }
+        return liff.getProfile();
+      }).then(function (profile) {
+        if (!profile) return;
+        userId = profile.userId;
+        show('form');
+      }).catch(function (err) {
+        fail('フォームを開けませんでした(' + (err && err.message ? err.message : err) + ')。');
+      });
+    }
+
+    document.getElementById('submit').onclick = function () {
+      var part = document.getElementById('f-part').value.trim();
+      var course = document.getElementById('f-course').value.trim();
+      var concern = document.getElementById('f-concern').value.trim();
+      if (!part && !course && !concern) { alert('いずれかの項目をご記入ください'); return; }
+      var btn = document.getElementById('submit');
+      btn.disabled = true;
+      btn.textContent = '送信中…';
+      // MKハブを経由せずGASのdoPostへ直接送信。
+      // Content-Type: text/plain でプリフライト(OPTIONS)を回避する
+      fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({
+          action: 'consult_submit',
+          uid: userId,
+          part: part, course: course, concern: concern,
+        }),
+      }).then(function (res) { return res.json(); }).then(function (data) {
+        if (data && data.ok) {
+          show('done');
+          if (liff.isInClient && liff.isInClient()) {
+            setTimeout(function () { liff.closeWindow(); }, 2500);
+          }
+        } else {
+          throw new Error((data && data.error) || '受付できませんでした');
+        }
+      }).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = '送信する';
+        fail('送信に失敗しました(' + (err && err.message ? err.message : err) + ')。');
+      });
+    };
+  </script>
+</body>
+</html>
