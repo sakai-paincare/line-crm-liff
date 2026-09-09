@@ -12,6 +12,8 @@ LINE公式アカウント「デジタル診察券」LIFFページ(GitHub Pages�
   - `reserve.html` … 予約導線の2択ページ(WEB予約 / LINEで予約希望)
 - `nagasaki/` … ながさきハートクリニック本番向け(card / track / reserve の3ページ。
   冒頭の `LIFF_ID` / `API_URL` は長崎のLoginチャネル・GAS作成後に記入)
+- `fukuoka/kaifuku.html` … 経過フォロー(Follow-up Core 6問)。LINE(LIFF)と院内iPad(`?mode=clinic&t=<token>`)で共用。
+  API契約は line-crm の `docs/kaifuku-followup.md`。院内モードは LIFF を初期化せず token だけで動く
 - `fukuoka/` … 福岡ペインケアクリニック本番向け(card / track / reserve の3ページ。
   `LIFF_ID` / `API_URL` 記入済み。reserve の `WEB_RESERVE_URL` のみ
   メディカル革命byGMOのURL確定待ち。手順は line-crm の docs/production-migration.md §4)
