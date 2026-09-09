@@ -158,7 +158,7 @@
         if (!r || !r.ok) { throw Object.assign(new Error((r && r.error) || '読み込めませんでした'), { code: r && r.code }); }
         INIT = r.data;
         if (INIT.all_answered) { return renderAnswered(); }
-        if (INIT.short_form) { EP = null; return renderStep('q6'); }
+        if (INIT.short_form) { EP = null; return renderStep('q1'); } // 旧2問版と同じ Q1(汎用ラベル)+Q6
         var open = INIT.episodes.filter(function (e) { return !e.answered_at; });
         if (open.length === 1) { EP = open[0]; return renderStep('q1'); }
         renderSelect(open);
@@ -218,15 +218,18 @@
     var ORDER = ['q1', 'q2', 'q3', 'q4', 'q5', 'q5d', 'q6'];
     function stepIndex(id) { return ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'].indexOf(id === 'q5d' ? 'q5' : id) + 1; }
     function header(id) {
-      if (!EP) return '<div class="meta">経過フォロー</div><h1>経過をお聞かせください</h1>' +
-        '<p class="lead">治療の経過確認は痛み治療を受けられた方向けです。今回は次回の診察でお伝えになりたいことだけお聞きします。</p>';
+      if (!EP) {
+        // 短縮版(エピソード未解決): 旧2問版と同じ2問。Q1 は汎用ラベル
+        return '<div class="meta">経過フォロー ' + (id === 'q1' ? 1 : 2) + ' / 2</div>' +
+          (id === 'q1' ? '<h1>経過をお聞かせください</h1><p class="lead">治療後の経過を確認させていただきます。ボタンを選んで進むだけです。</p>' : '');
+      }
       return '<div class="meta">経過フォロー ' + stepIndex(id) + ' / 6</div>' +
         (id === 'q1' ? '<div class="intro">' + esc(EP.intro) + '</div>' : '');
     }
     function nav(id, nextLabel) {
       var i = ORDER.indexOf(id);
       var back = '';
-      if (EP && i > 0) back = '<button type="button" class="ghost" id="back">前へ</button>';
+      if (i > 0) back = '<button type="button" class="ghost" id="back">前へ</button>';
       return '<div class="nav">' + back + '<button type="button" class="primary" id="next" disabled>' + (nextLabel || '次へ') + '</button></div>';
     }
     function optsHtml(items, selected, multi, cls) {
@@ -248,10 +251,12 @@
     }
     function prevStep(id) {
       var i = ORDER.indexOf(id);
+      if (!EP) return 'q1';
       if (id === 'q6' && !aeReported()) return 'q5';
       return ORDER[i - 1];
     }
     function nextStep(id) {
+      if (!EP) return 'q6';
       if (id === 'q5') return aeReported() ? 'q5d' : 'q6';
       return ORDER[ORDER.indexOf(id) + 1];
     }
@@ -266,8 +271,10 @@
 
     function renderStep(id) {
       if (id === 'q1') {
-        var html = header('q1') + '<div class="q">Q1. 初回治療前に一番困っていた『' + esc(EP.q1_label) + '』についてお聞きします。<br>初回治療前の痛みを10とすると、過去7日間の痛みはどのくらいですか？</div>' +
-          '<div class="scale" id="scale"></div><div class="legend"><span>0 = 痛みなし</span><span>10 = 治療前と同じ</span></div>' + nav('q1');
+        var q1Label = EP ? EP.q1_label : '治療した部位の痛み';
+        var html = header('q1') + '<div class="q">Q1. 初回治療前に一番困っていた『' + esc(q1Label) + '』についてお聞きします。<br>初回治療前の痛みを10とすると、過去7日間の痛みはどのくらいですか？</div>' +
+          '<div class="scale" id="scale"></div><div class="legend"><span>0 = 痛みなし</span><span>10 = 治療前と同じ</span></div>' +
+          (EP ? '' : '<p class="hint" style="margin-top:8px;">複数の部位を治療された方は、元々いちばん痛みでお困りだった部位についてお答えください。</p>') + nav('q1');
         render(html);
         var el = document.getElementById('scale');
         for (var i = 0; i <= 10; i++) { var b = document.createElement('button'); b.type = 'button'; b.textContent = i; b.dataset.v = i; if (A.nrs === i) b.className = 'on'; el.appendChild(b); }
@@ -277,7 +284,7 @@
           A.nrs = Number(t.dataset.v);
           Array.prototype.forEach.call(el.querySelectorAll('button'), function (x) { x.classList.toggle('on', x === t); });
         });
-        bindNext('q1', function () { return A.nrs !== null; }, function () { renderStep('q2'); });
+        bindNext('q1', function () { return A.nrs !== null; }, function () { renderStep(nextStep('q1')); });
         return;
       }
       if (id === 'q2') {
@@ -361,7 +368,7 @@
         var hint = MODE === 'clinic'
           ? '<p class="hint">いただいた内容は本日の診察時に医師が確認します。</p>'
           : '<p class="hint">いただいた内容は診察時に医師が確認します。お急ぎのご相談は『無料相談・お問い合わせ』からお願いします。</p>';
-        render(header('q6') + '<div class="q">' + (EP ? 'Q6. ' : '') + '次回の診察で医師に伝えておきたいことはありますか？</div>' +
+        render(header('q6') + '<div class="q">' + (EP ? 'Q6. ' : 'Q2. ') + '次回の診察で医師に伝えておきたいことはありますか？</div>' +
           optsHtml([{ key: 'no', label: '特にありません' }, { key: 'yes', label: 'あります' }], A.hasNote === null ? '' : (A.hasNote ? 'yes' : 'no'), false) +
           '<div id="notebox" ' + (A.hasNote ? '' : 'hidden') + '><textarea id="f-note" placeholder="まだ肩の痛みが残っている／追加治療をした方がいいか聞きたい／気をつけることを知りたい">' + esc(A.note) + '</textarea></div>' +
           hint + nav('q6', '送信する'));
@@ -384,10 +391,10 @@
     function submit() {
       var btn = document.getElementById('next');
       btn.disabled = true; btn.textContent = '送信中…';
-      var body = { action: 'kaifuku_submit', form_version: FORM_VERSION, has_note: !!A.hasNote, note: A.hasNote ? A.note : '', timing: timing, campaign: campaign };
+      var body = { action: 'kaifuku_submit', form_version: FORM_VERSION, nrs: A.nrs, has_note: !!A.hasNote, note: A.hasNote ? A.note : '', timing: timing, campaign: campaign };
       if (EP) {
         body.episode_id = EP.episode_id;
-        body.nrs = A.nrs; body.pgic = A.pgic; body.analgesic_days_7d = A.analgesic;
+        body.pgic = A.pgic; body.analgesic_days_7d = A.analgesic;
         body.added_treatments = A.added.map(function (k) { return k === 'other' ? 'other:' + A.addedOther : k; });
         body.ae_flags = A.ae.map(function (k) { return k === 'other' ? 'other:' + A.aeOther : k; });
         if (aeReported()) body.ae_detail = A.aeDetail;
