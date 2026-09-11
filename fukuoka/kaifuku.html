@@ -116,8 +116,13 @@
     var idToken = '';
     var INIT = null;      // kaifuku_init の data
     var EP = null;        // 選択中のエピソード
-    var A = { nrs: null, pgic: null, analgesic: null, added: [], addedOther: '', ae: [], aeOther: '',
-              aeDetail: { onset: '', days: '', visited: '', treated: '', admitted: '' }, hasNote: null, note: '' };
+    var A = blankAnswers();
+    function blankAnswers() {
+      return { nrs: null, pgic: null, analgesic: null, added: [], addedOther: '', ae: [], aeOther: '',
+               aeDetail: { onset: '', days: '', visited: '', treated: '', admitted: '' }, hasNote: null, note: '',
+               // Step 7(院内モードのみ): 新たな症状 / 気になる診療 / EQ-5D-5L
+               newSym: { has: null, areas: [], text: '' }, interests: [], interestOther: '', eq5d: {}, eqVas: null };
+    }
 
     var $screen = document.getElementById('screen');
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -210,27 +215,36 @@
       });
     }
 
-    function resetAnswers() {
-      A = { nrs: null, pgic: null, analgesic: null, added: [], addedOther: '', ae: [], aeOther: '',
-            aeDetail: { onset: '', days: '', visited: '', treated: '', admitted: '' }, hasNote: null, note: '' };
-    }
+    function resetAnswers() { A = blankAnswers(); }
 
-    var ORDER = ['q1', 'q2', 'q3', 'q4', 'q5', 'q5d', 'q6'];
-    function stepIndex(id) { return ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'].indexOf(id === 'q5d' ? 'q5' : id) + 1; }
+    var ORDER = ['q1', 'q2', 'q3', 'q4', 'q5', 'q5d', 'q6', 'q7', 'q8', 'q9'];
+    // 院内モードの末尾3項目(新たな症状 q7 / 気になる診療 q8 / EQ-5D q9=M3・M6・M12 のみ)。LINEモードには出さない
+    function hasExtra() { return MODE === 'clinic' && !!(INIT && INIT.extra); }
+    function hasEq5d() { return hasExtra() && !!(EP && EP.eq5d); }
+    // 表示する質問の並び(進捗 n / N 用)
+    function visibleSteps() {
+      var base = EP ? ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'] : ['q1', 'q6'];
+      if (hasExtra()) base = base.concat(['q7', 'q8']);
+      if (hasEq5d()) base.push('q9');
+      return base;
+    }
+    function stepIndex(id) { return visibleSteps().indexOf(id === 'q5d' ? 'q5' : id) + 1; }
+    function isLastStep(id) { var v = visibleSteps(); return v[v.length - 1] === id; }
     function header(id) {
+      var total = visibleSteps().length;
       if (!EP) {
-        // 短縮版(エピソード未解決): 旧2問版と同じ2問。Q1 は汎用ラベル
-        return '<div class="meta">経過フォロー ' + (id === 'q1' ? 1 : 2) + ' / 2</div>' +
+        // 短縮版(エピソード未解決): 旧2問版と同じ2問(院内は末尾に3項目)。Q1 は汎用ラベル
+        return '<div class="meta">経過フォロー ' + stepIndex(id) + ' / ' + total + '</div>' +
           (id === 'q1' ? '<h1>経過をお聞かせください</h1><p class="lead">治療後の経過を確認させていただきます。ボタンを選んで進むだけです。</p>' : '');
       }
-      return '<div class="meta">経過フォロー ' + stepIndex(id) + ' / 6</div>' +
+      return '<div class="meta">経過フォロー ' + stepIndex(id) + ' / ' + total + '</div>' +
         (id === 'q1' ? '<div class="intro">' + esc(EP.intro) + '</div>' : '');
     }
     function nav(id, nextLabel) {
       var i = ORDER.indexOf(id);
       var back = '';
       if (i > 0) back = '<button type="button" class="ghost" id="back">前へ</button>';
-      return '<div class="nav">' + back + '<button type="button" class="primary" id="next" disabled>' + (nextLabel || '次へ') + '</button></div>';
+      return '<div class="nav">' + back + '<button type="button" class="primary" id="next" disabled>' + (nextLabel || (isLastStep(id) ? '送信する' : '次へ')) + '</button></div>';
     }
     function optsHtml(items, selected, multi, cls) {
       return '<div class="opts">' + items.map(function (o) {
@@ -250,15 +264,15 @@
       if (back) back.onclick = function () { renderStep(prevStep(id)); };
     }
     function prevStep(id) {
-      var i = ORDER.indexOf(id);
-      if (!EP) return 'q1';
-      if (id === 'q6' && !aeReported()) return 'q5';
-      return ORDER[i - 1];
+      var v = visibleSteps(); var i = v.indexOf(id);
+      if (id === 'q6' && EP && aeReported()) return 'q5d';
+      return v[i - 1] || 'q1';
     }
     function nextStep(id) {
-      if (!EP) return 'q6';
       if (id === 'q5') return aeReported() ? 'q5d' : 'q6';
-      return ORDER[ORDER.indexOf(id) + 1];
+      if (id === 'q5d') return 'q6';
+      var v = visibleSteps(); var i = v.indexOf(id);
+      return v[i + 1] || null; // null = 送信
     }
     function aeReported() { return A.ae.length > 0 && !(A.ae.length === 1 && A.ae[0] === 'none'); }
     function toggleMulti(arr, key) {
@@ -371,7 +385,7 @@
         render(header('q6') + '<div class="q">' + (EP ? 'Q6. ' : 'Q2. ') + '次回の診察で医師に伝えておきたいことはありますか？</div>' +
           optsHtml([{ key: 'no', label: '特にありません' }, { key: 'yes', label: 'あります' }], A.hasNote === null ? '' : (A.hasNote ? 'yes' : 'no'), false) +
           '<div id="notebox" ' + (A.hasNote ? '' : 'hidden') + '><textarea id="f-note" placeholder="まだ肩の痛みが残っている／追加治療をした方がいいか聞きたい／気をつけることを知りたい">' + esc(A.note) + '</textarea></div>' +
-          hint + nav('q6', '送信する'));
+          hint + nav('q6'));
         $screen.querySelector('.opts').addEventListener('click', function (e) {
           var b = e.target.closest('.opt'); if (!b) return;
           A.hasNote = b.dataset.k === 'yes';
@@ -382,7 +396,74 @@
         bindNext('q6', function () {
           A.note = (document.getElementById('f-note').value || '').trim();
           return A.hasNote !== null && (!A.hasNote || A.note !== '');
-        }, submit);
+        }, function () { var n = nextStep('q6'); if (n) renderStep(n); else submit(); });
+        return;
+      }
+      // ---- Step 7(院内モードのみ): 再診問診の3項目(既存の再診フォームの質問文・選択肢を踏襲) ----
+      if (id === 'q7') {
+        var o7 = INIT.options.new_symptom;
+        render(header('q7') + '<div class="q">' + esc(o7.question) + '</div>' +
+          optsHtml([{ key: 'no', label: 'なし' }, { key: 'yes', label: 'あります' }], A.newSym.has === null ? '' : (A.newSym.has ? 'yes' : 'no'), false, 'ns-has') +
+          '<div id="nsbox" ' + (A.newSym.has ? '' : 'hidden') + '><p class="sub" style="margin-top:10px">当てはまる部位を選んでください（複数可）</p>' +
+          optsHtml(o7.areas.map(function (a) { return { key: a, label: a }; }), A.newSym.areas, true, 'ns-area') +
+          '<input type="text" id="f-ns-text" placeholder="症状の内容（自由記載）" value="' + esc(A.newSym.text) + '"></div>' + nav('q7'));
+        $screen.addEventListener('click', function (e) {
+          var b = e.target.closest('.opt'); if (!b) return;
+          if (b.classList.contains('ns-has')) {
+            A.newSym.has = b.dataset.k === 'yes';
+            Array.prototype.forEach.call($screen.querySelectorAll('.ns-has'), function (x) { x.classList.toggle('on', x === b); });
+            document.getElementById('nsbox').hidden = !A.newSym.has;
+          } else if (b.classList.contains('ns-area')) {
+            var i = A.newSym.areas.indexOf(b.dataset.k);
+            if (i === -1) A.newSym.areas.push(b.dataset.k); else A.newSym.areas.splice(i, 1);
+            b.classList.toggle('on', i === -1);
+          }
+        });
+        bindNext('q7', function () {
+          A.newSym.text = (document.getElementById('f-ns-text').value || '').trim();
+          return A.newSym.has !== null && (!A.newSym.has || A.newSym.areas.length > 0 || A.newSym.text !== '');
+        }, function () { renderStep(nextStep('q7')); });
+        return;
+      }
+      if (id === 'q8') {
+        var o8 = INIT.options.interests;
+        render(header('q8') + '<div class="q">' + esc(o8.question) + '（複数選択可）</div>' +
+          optsHtml(o8.options.map(function (a) { return { key: a, label: a }; }), A.interests, true) +
+          '<div id="otherbox" ' + (A.interests.indexOf('その他') === -1 ? 'hidden' : '') + '><input type="text" id="f-int-other" placeholder="気になっている内容" value="' + esc(A.interestOther) + '"></div>' + nav('q8'));
+        $screen.querySelector('.opts').addEventListener('click', function (e) {
+          var b = e.target.closest('.opt'); if (!b) return;
+          var k = b.dataset.k;
+          if (k === 'なし') A.interests = ['なし'];
+          else { A.interests = A.interests.filter(function (x) { return x !== 'なし'; }); var i = A.interests.indexOf(k); if (i === -1) A.interests.push(k); else A.interests.splice(i, 1); }
+          Array.prototype.forEach.call($screen.querySelectorAll('.opt'), function (x) { x.classList.toggle('on', A.interests.indexOf(x.dataset.k) !== -1); });
+          document.getElementById('otherbox').hidden = A.interests.indexOf('その他') === -1;
+        });
+        bindNext('q8', function () {
+          A.interestOther = (document.getElementById('f-int-other').value || '').trim();
+          return A.interests.length > 0 && (A.interests.indexOf('その他') === -1 || A.interestOther !== '');
+        }, function () { var n = nextStep('q8'); if (n) renderStep(n); else submit(); });
+        return;
+      }
+      if (id === 'q9') {
+        var o9 = INIT.options.eq5d;
+        var h9 = header('q9') + '<div class="q">今日のあなたの健康状態についてお聞きします。各項目で最も当てはまるものを1つ選んでください。</div>';
+        o9.dimensions.forEach(function (d) {
+          h9 += '<div class="group" data-g="' + esc(d.key) + '"><div class="gq">' + esc(d.label) + '</div><div class="opts" style="flex-direction:column">' +
+            d.levels.map(function (lv, i) { return '<button type="button" class="opt' + (A.eq5d[d.key] === i + 1 ? ' on' : '') + '" data-k="' + (i + 1) + '"><span class="mark"></span><span>' + esc(lv) + '</span></button>'; }).join('') + '</div></div>';
+        });
+        h9 += '<div class="group"><div class="gq">' + esc(o9.vas_question) + '</div>' +
+          '<input type="range" id="f-vas" min="0" max="100" step="1" value="' + (A.eqVas === null ? 50 : A.eqVas) + '" style="width:100%">' +
+          '<div class="legend"><span>0 最悪</span><span id="vas-val" style="font-size:16px;font-weight:700;color:#334">' + (A.eqVas === null ? '未選択' : A.eqVas) + '</span><span>100 最善</span></div></div>' + nav('q9');
+        render(h9 + '');
+        $screen.addEventListener('click', function (e) {
+          var b = e.target.closest('.opt'); if (!b) return;
+          var g = b.closest('.group'); if (!g || !g.dataset.g) return;
+          A.eq5d[g.dataset.g] = Number(b.dataset.k);
+          Array.prototype.forEach.call(g.querySelectorAll('.opt'), function (x) { x.classList.toggle('on', x === b); });
+        });
+        var vas = document.getElementById('f-vas');
+        vas.addEventListener('input', function () { A.eqVas = Number(vas.value); document.getElementById('vas-val').textContent = A.eqVas; });
+        bindNext('q9', function () { return o9.dimensions.every(function (d) { return A.eq5d[d.key] >= 1; }) && A.eqVas !== null; }, function () { var n = nextStep('q9'); if (n) renderStep(n); else submit(); });
         return;
       }
     }
@@ -398,6 +479,11 @@
         body.added_treatments = A.added.map(function (k) { return k === 'other' ? 'other:' + A.addedOther : k; });
         body.ae_flags = A.ae.map(function (k) { return k === 'other' ? 'other:' + A.aeOther : k; });
         if (aeReported()) body.ae_detail = A.aeDetail;
+      }
+      if (hasExtra()) {
+        body.new_symptom = { has: !!A.newSym.has, areas: A.newSym.has ? A.newSym.areas : [], text: A.newSym.has ? A.newSym.text : '' };
+        body.interest_tags = A.interests.map(function (k) { return k === 'その他' ? 'その他:' + A.interestOther : k; });
+        if (hasEq5d()) { body.eq5d = A.eq5d; body.eq_vas = A.eqVas; }
       }
       callApi(body).then(function (data) {
         if (data && data.ok) return renderDone();
