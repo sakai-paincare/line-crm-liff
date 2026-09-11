@@ -232,13 +232,14 @@
     function isLastStep(id) { var v = visibleSteps(); return v[v.length - 1] === id; }
     function header(id) {
       var total = visibleSteps().length;
+      var idx = stepIndex(id);
+      var remain = total - idx; // この画面を除いた残り問数
+      var meta = '<div class="meta">経過フォロー ' + idx + ' / ' + total + '　' + (remain === 0 ? '最後の質問です' : 'あと ' + remain + ' 問') + '</div>';
       if (!EP) {
         // 短縮版(エピソード未解決): 旧2問版と同じ2問(院内は末尾に3項目)。Q1 は汎用ラベル
-        return '<div class="meta">経過フォロー ' + stepIndex(id) + ' / ' + total + '</div>' +
-          (id === 'q1' ? '<h1>経過をお聞かせください</h1><p class="lead">治療後の経過を確認させていただきます。ボタンを選んで進むだけです。</p>' : '');
+        return meta + (id === 'q1' ? '<h1>経過をお聞かせください</h1><p class="lead">治療後の経過を確認させていただきます。ボタンを選んで進むだけです。</p>' : '');
       }
-      return '<div class="meta">経過フォロー ' + stepIndex(id) + ' / ' + total + '</div>' +
-        (id === 'q1' ? '<div class="intro">' + esc(EP.intro) + '</div>' : '');
+      return meta + (id === 'q1' ? '<div class="intro">' + esc(EP.intro) + '</div>' : '');
     }
     function nav(id, nextLabel) {
       var i = ORDER.indexOf(id);
