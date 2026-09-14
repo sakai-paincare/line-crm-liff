@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>初診問診</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif; background: #f0f4f5; min-height: 100vh; padding: 16px; }
+    .panel { background: #fff; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); padding: 24px 20px; width: 100%; max-width: 440px; margin: 0 auto; }
+    .message { font-size: 15px; line-height: 1.8; color: #334; text-align: center; padding: 24px 0; }
+    .error { color: #b00020; font-size: 14px; line-height: 1.7; white-space: pre-line; }
+    a.btn { display: block; margin-top: 16px; padding: 14px; border-radius: 12px; background: #E44888; color: #fff; text-align: center; text-decoration: none; font-weight: 700; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div id="loading" class="message">初診問診の準備をしています…</div>
+    <div id="ready" hidden>
+      <div class="message">問診フォームを開きます。<br>自動で切り替わらない場合は下のボタンを押してください。</div>
+      <a id="open" class="btn" href="#" target="_blank" rel="noopener">問診フォームを開く</a>
+    </div>
+    <div id="error" class="error" hidden></div>
+  </div>
+
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script>
+    // ============================================================
+    // 設定 — 福岡ペインケアクリニック本番版(GitHub Pages配信のためHTMLに直接記載)
+    // ============================================================
+    // ⚠ Loginチャネル「会員証」(2010587487)に shoshin 用LIFFを作成し(scope: openid)、LIFF ID を記入すること(line-crm docs/shoshin-liff.md)
+    var LIFF_ID = 'SET_ME';
+    // 福岡本番GASウェブアプリの /exec URL(kaifuku.html と同じ)
+    var API_URL = 'https://script.google.com/macros/s/AKfycbx56mHvPH4TgoasxPWLFqHAbhcOsSAJIj29cb2_o0cRqndksCuRifXX2KbYSGPhSwVt/exec';
+
+    function show(id) { ['loading', 'ready', 'error'].forEach(function (x) { document.getElementById(x).hidden = (x !== id); }); }
+    function fail(message) {
+      document.getElementById('error').textContent = message + '\nお手数ですがトーク画面から「無料相談・お問い合わせ」をご利用いただくか、受付にお申し出ください。';
+      show('error');
+    }
+
+    // GAS(shoshin_init)から事前入力済みのフォームURLを受け取ってリダイレクトする。
+    // 紐付き済み: 診察場所・ID・お名前(ひらがな)・生年月日を事前入力 / 未紐付け: 診察場所のみ
+    function init(userId, idToken) {
+      var body = { action: 'shoshin_init', mode: 'line', uid: userId };
+      if (idToken) body.id_token = idToken; // 取得できなければ uid だけで送る(移行中は log モード前提)
+      fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body) })
+        .then(function (res) { return res.text(); })
+        .then(function (t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('応答を読み取れませんでした'); } return d; })
+        .then(function (d) {
+          if (!d || !d.ok || !d.data || !d.data.url) throw new Error((d && d.error) || '準備できませんでした');
+          var a = document.getElementById('open');
+          a.href = d.data.url;
+          show('ready');
+          // LINE内ブラウザではフォームを外部ブラウザで開く方が入力しやすい(openWindow が使えなければ同一タブで遷移)
+          if (window.liff && liff.isInClient && liff.isInClient() && liff.openWindow) {
+            liff.openWindow({ url: d.data.url, external: true });
+          } else {
+            location.replace(d.data.url);
+          }
+        })
+        .catch(function (err) { fail('問診フォームを開けませんでした(' + (err && err.message ? err.message : err) + ')。'); });
+    }
+
+    if (LIFF_ID === 'SET_ME') {
+      fail('初診問診の準備中です(LIFF未設定)。');
+    } else {
+      liff.init({ liffId: LIFF_ID }).then(function () {
+        if (!liff.isLoggedIn()) { liff.login(); return null; }
+        return liff.getProfile();
+      }).then(function (profile) {
+        if (!profile) return;
+        var idToken = '';
+        try { idToken = liff.getIDToken() || ''; } catch (e) { idToken = ''; }
+        init(profile.userId, idToken);
+      }).catch(function (err) { fail('フォームを開けませんでした(' + (err && err.message ? err.message : err) + ')。'); });
+    }
+  </script>
+</body>
+</html>
