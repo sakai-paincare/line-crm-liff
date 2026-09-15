@@ -159,9 +159,11 @@
 
     // ---- 起動 ----
     function boot() {
-      callApi({ action: 'kaifuku_init' }).then(function (r) {
+      // 配信パラメータ(?c=)を init にも渡す(来院前ゲートは ?c= なしで開いたときだけ働く)
+      callApi({ action: 'kaifuku_init', campaign: campaign, timing: timing }).then(function (r) {
         if (!r || !r.ok) { throw Object.assign(new Error((r && r.error) || '読み込めませんでした'), { code: r && r.code }); }
         INIT = r.data;
+        if (INIT.early) { return renderEarly(INIT); } // 来院前ゲート: 次回予約が1週間より先 → 案内のみ(回答は記録しない)
         if (INIT.all_answered) { return renderAnswered(); }
         if (INIT.short_form) { EP = null; return renderStep('q1'); } // 旧2問版と同じ Q1(汎用ラベル)+Q6
         var open = INIT.episodes.filter(function (e) { return !e.answered_at; });
@@ -191,6 +193,13 @@
     }
 
     // ---- 画面 ----
+    function renderEarly(d) {
+      var nr = String(d.next_reservation_date || '');
+      var label = nr ? Number(nr.slice(5, 7)) + '月' + Number(nr.slice(8, 10)) + '日' : '';
+      render('<div class="message big">' + esc(d.message || 'ご来院の1週間前から回答できます。前日にもう一度ご案内が届きます。') + '</div>' +
+        (label ? '<div class="message">次回のご来院予定: ' + esc(label) + '</div>' : ''));
+      closeIfLine();
+    }
     function renderAnswered() {
       render('<div class="message big">ご回答済みです。<br>ありがとうございます。</div>' +
         (MODE === 'clinic' ? '<div class="message">受付にiPadをお返しください。</div>' : ''));
