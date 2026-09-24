@@ -391,8 +391,8 @@
       if (id === 'q6') {
         var hint = MODE === 'clinic'
           ? '<p class="hint">いただいた内容は本日の診察時に医師が確認します。</p>'
-          : '<p class="hint">いただいた内容は診察時に医師が確認します。お急ぎのご相談は『無料相談・お問い合わせ』からお願いします。</p>';
-        render(header('q6') + '<div class="q">' + (EP ? 'Q6. ' : 'Q2. ') + '次回の診察で医師に伝えておきたいことはありますか？</div>' +
+          : '<p class="hint">いただいた内容は医師が確認いたします。お返事が必要な内容の場合は、こちらのLINEからご連絡いたします。お急ぎのご相談は「無料相談・お問い合わせ」からお願いします。</p>';
+        render(header('q6') + '<div class="q">' + (EP ? 'Q6. ' : 'Q2. ') + '医師に伝えておきたいことはありますか？</div>' +
           optsHtml([{ key: 'no', label: '特にありません' }, { key: 'yes', label: 'あります' }], A.hasNote === null ? '' : (A.hasNote ? 'yes' : 'no'), false) +
           '<div id="notebox" ' + (A.hasNote ? '' : 'hidden') + '><textarea id="f-note" placeholder="まだ肩の痛みが残っている／追加治療をした方がいいか聞きたい／気をつけることを知りたい">' + esc(A.note) + '</textarea></div>' +
           hint + nav('q6'));
@@ -520,7 +520,7 @@
         render('<div class="message big">✅ ありがとうございました。<br>受付にiPadをお返しください。</div>');
         return;
       }
-      render('<div class="message">✅ ありがとうございました。<br>経過を受け付けました。<br>次回の診察時に医師が確認いたします。</div>');
+      render('<div class="message">✅ ご回答ありがとうございました。<br>医師が確認し、お返事が必要な内容の場合はLINEからご連絡いたします。</div>');
       closeIfLine();
     }
     function closeIfLine() {
